@@ -24,7 +24,7 @@ VER := $(shell head -n 1 NEWS | cut -d : -f 1)
 all: fuseflt
 
 fuseflt: fuseflt.c NEWS
-	$(CC) $(shell pkg-config fuse --cflags --libs) $(CFLAGS) -lcfg+ -DVERSION=\"$(VER)\" $< -o $@
+	$(CC) $< $(shell pkg-config fuse --cflags --libs) $(CFLAGS) -lcfg+ -DVERSION=\"$(VER)\" -o $@
 
 install: all
 	install -D -m755 fuseflt $(bindir)/fuseflt
