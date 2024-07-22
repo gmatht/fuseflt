@@ -131,6 +131,7 @@ static int fdc_chk_int = FDC_CHK_INT;
 typedef struct __fdcent_t {
 	char path[PATH_MAX];
 	struct timeval et;
+	struct timeval ct;
 	struct stat st;
 	int fd;
 	char *tfn;
@@ -156,6 +157,19 @@ static void fdc_prune(int n);
 
 #define RET(r)	{ free(vpath); return(r); }
 #define ERR(x)	{ res = -errno; x; RET(res) }
+
+static void fdc_free(void *p) {
+	DBGMSG("fdc: remove %s", ((fdcent_t *)p)->path);
+	if (fdc_ghost_tmp) {
+		close(((fdcent_t *)p)->fd);
+	} else {
+		unlink(((fdcent_t *)p)->tfn);
+		free(((fdcent_t *)p)->tfn);
+	}
+	--fdc_nr;
+	free(p);
+}
+
 static int fdc_open(const char *path, struct stat *stbuf)
 {
 	int res, rfd;
@@ -169,6 +183,39 @@ static int fdc_open(const char *path, struct stat *stbuf)
 	strncpy(fdctmp.path, vpath, PATH_MAX);
 	pthread_mutex_lock(&fdc_mutex);
 	fdcres = tfind(&fdctmp, &fdc, fdcentcmp);
+
+	/* Now make sure cache is newer than src */
+	if (fdcres != NULL) {
+		time_t t_cache, t_src;
+		struct stat file_stat;
+		int err = stat(path, &file_stat);
+		if (err != 0) {
+			DBGMSG("mod_time: stat ERR [%s,%d]", path, err);
+			t_src=0;
+		} else {
+			t_src=file_stat.st_mtime;
+		}
+		t_cache=((*fdcres)->ct.tv_sec);
+
+
+		if(!(t_cache>t_src || (t_cache==t_src && t_src == time(0)))) {
+			tdelete(&fdctmp, &fdc, fdcentcmp);
+
+			/*fdc_free(fdcres);
+			I would have thought we should free everything now, but that seems to cause problems*/
+		        if (fdc_ghost_tmp) {
+				/* CRASH: close((*fdcres)->fd); */
+		        } else {
+                		unlink((*fdcres)->tfn);
+                		free((*fdcres)->tfn);
+        		}
+			--fdc_nr;
+			/* CRASH: free(fdcres); */
+
+			fdcres = NULL;
+		}
+	}
+
 	if (fdcres != NULL) {
 		DBGMSG("fdc: retrieve %s", vpath);
 
@@ -270,6 +317,7 @@ static int fdc_open(const char *path, struct stat *stbuf)
 			ERR(close(rfd))
 		strncpy(fdcent->path, vpath, PATH_MAX);
 		gettimeofday(&(fdcent->et), NULL);
+		gettimeofday(&(fdcent->ct), NULL);
 		fdcent->st = st;
 		if (fdc_ghost_tmp) {
 			fdcent->fd = dup(rfd);
@@ -329,18 +377,6 @@ static void fdc_walk_delete_removed(const void *p, const VISIT v, const int d)
 {
 	if ((v == endorder) || (v == leaf))
 		tdelete(*((fdcent_t **)p), &fdc, fdcentcmp);
-}
-
-static void fdc_free(void *p) {
-	DBGMSG("fdc: remove %s", ((fdcent_t *)p)->path);
-	if (fdc_ghost_tmp) {
-		close(((fdcent_t *)p)->fd);
-	} else {
-		unlink(((fdcent_t *)p)->tfn);
-		free(((fdcent_t *)p)->tfn);
-	}
-	--fdc_nr;
-	free(p);
 }
 
 static void fdc_expire_mark(const void *p, const VISIT v, const int d)
